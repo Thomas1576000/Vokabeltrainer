@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'de.hoeltzel.vokabeltrainer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'de.hoeltzel.vokabeltrainer'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        // Fester Schlüssel, damit spätere Versionen sich über die alte installieren lassen.
+        fest {
+            storeFile file('vokabeltrainer.keystore')
+            storePassword 'vokabeltrainer'
+            keyAlias 'vokabeltrainer'
+            keyPassword 'vokabeltrainer'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fest
+        }
+        debug {
+            signingConfig signingConfigs.fest
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

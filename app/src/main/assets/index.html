@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vokabeltrainer</title>
+<script src="pdf.min.js"></script>
+<script src="pdf.worker.min.js"></script>
+<script>
+/* Android-Anbindung: Spracherkennung und Vorlesen über das System */
+(function(){
+  var A=window.AndroidApp; if(!A) return;
+  if(A.srAvailable()){
+    function AndroidSR(){this.lang="en-US";this.maxAlternatives=5;this.onresult=null;this.onerror=null;this.onend=null}
+    AndroidSR.prototype.start=function(){window.__sr=this;A.srStart(this.lang,this.maxAlternatives|0)};
+    AndroidSR.prototype.stop=function(){A.srStop()};
+    AndroidSR.prototype.abort=function(){A.srStop()};
+    AndroidSR.prototype._result=function(arr){
+      var res=arr.map(function(a){return {transcript:a.t,confidence:a.c>0?a.c:0}});
+      res.isFinal=true; if(this.onresult) this.onresult({results:[res]});
+    };
+    AndroidSR.prototype._error=function(code){if(this.onerror) this.onerror({error:code})};
+    AndroidSR.prototype._end=function(){if(window.__sr===this) window.__sr=null; if(this.onend) this.onend()};
+    window.__AndroidSR=AndroidSR;
+  }
+  window.__vtSynth={cancel:function(){A.ttsStop()},getVoices:function(){return []}};
+})();
+</script>
+<style>
+:root{
+  --bg:#E6EAEE; --card:#FBFCFD; --ink:#1C2638; --muted:#5B6678; --line:#C9D0DA;
+  --accent:#2D4F86; --ok:#24704F; --ok-bg:#E1F0E8; --bad:#9E2F3C; --bad-bg:#F6E3E5; --warn:#8A6514; --warn-bg:#F5ECD6;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141922; --card:#1C2330; --ink:#E4E8EF; --muted:#9AA4B5; --line:#2E3747;
+  --accent:#8EB0E8; --ok:#6BC69A; --ok-bg:#1B3127; --bad:#E58792; --bad-bg:#3A1F24; --warn:#E0BE6E; --warn-bg:#352C17;
+}}
+:root[data-theme="dark"]{
+  --bg:#141922; --card:#1C2330; --ink:#E4E8EF; --muted:#9AA4B5; --line:#2E3747;
+  --accent:#8EB0E8; --ok:#6BC69A; --ok-bg:#1B3127; --bad:#E58792; --bad-bg:#3A1F24; --warn:#E0BE6E; --warn-bg:#352C17;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:560px;margin:0 auto;padding:20px 16px 40px}
+h1{font:600 28px/1.15 "Newsreader",Georgia,serif;margin:8px 0 4px}
+p.sub{color:var(--muted);margin:0 0 20px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:14px}
+.panel h2{font-size:15px;font-weight:600;margin:0 0 10px}
+.drop{position:relative;border:1.5px dashed var(--line);border-radius:8px;padding:22px 14px;text-align:center;color:var(--muted);cursor:pointer}
+.drop{display:block}.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}
+.drop.over{border-color:var(--accent);color:var(--accent)}
+.drop strong{color:var(--ink)}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{flex:1 1 auto;text-align:center;border:1px solid var(--line);border-radius:7px;padding:9px 10px;cursor:pointer;font-size:15px;user-select:none}
+.seg input:checked+label{background:var(--accent);border-color:var(--accent);color:var(--card)}
+.seg input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+.seg input:disabled+label{opacity:.4;cursor:not-allowed}
+.note{font-size:13px;color:var(--muted);margin:8px 0 0}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 16px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--card);font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.files{font-size:14px;margin:10px 0 0;padding:0;list-style:none}
+.files li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid var(--line)}
+.files li:first-child{border-top:0}
+.files button{padding:2px 8px;font-size:13px}
+.hidden{display:none!important}
+
+/* Abfrage */
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;font-size:14px;color:var(--muted)}
+.bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:16px}
+.bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px 20px 22px}
+.dir{font-size:13px;color:var(--muted);margin-bottom:6px}
+.word{font:600 clamp(26px,7vw,38px)/1.15 "Newsreader",Georgia,serif;margin:0 0 22px;overflow-wrap:anywhere}
+.word button{vertical-align:middle;margin-left:6px;padding:4px 9px;font:500 13px "Instrument Sans",sans-serif}
+input[type=text]{width:100%;font:inherit;font-size:18px;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.choices{display:grid;gap:8px}
+.choices button{text-align:left;padding:12px 14px;font-size:16px}
+.choices button.right{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.choices button.wrong{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+.mic{width:100%;padding:16px;font-size:17px}
+.mic.listening{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+.fb{margin-top:16px;border-radius:8px;padding:12px 14px;font-size:15px}
+.fb.ok{background:var(--ok-bg);color:var(--ok)}
+.fb.bad{background:var(--bad-bg);color:var(--bad)}
+.fb.warn{background:var(--warn-bg);color:var(--warn)}
+.fb b{font-weight:600}
+.fb .sol{color:var(--ink);display:block;margin-top:4px}
+.fb .pr{display:block;margin-top:4px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.actions .grow{flex:1}
+
+/* Ergebnis */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 16px}
+.stats div{background:var(--bg);border-radius:8px;padding:10px;text-align:center}
+.stats b{display:block;font:600 24px "Newsreader",Georgia,serif}
+.stats span{font-size:13px;color:var(--muted)}
+.list{font-size:15px;margin:0;padding:0;list-style:none}
+.list li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line)}
+.list li:first-child{border-top:0}
+.list .n{color:var(--bad);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<main>
+
+<!-- Einrichtung -->
+<section id="setup">
+  <h1>Vokabeltrainer</h1>
+  <p class="sub">Englisch – Deutsch. Liste laden, Modus wählen, los.</p>
+
+  <div class="panel">
+    <h2>Vokabelliste</h2>
+    <label class="drop" id="drop" for="file">
+      <strong>PDF auswählen</strong> oder hierher ziehen<br><span style="font-size:13px">Mehrere Listen werden zusammengelegt</span>
+      <input type="file" id="file" accept=".pdf,application/pdf" multiple class="vh">
+    </label>
+    <ul class="files" id="files"></ul>
+    <p class="note" id="loadmsg"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Abfrage</h2>
+    <div class="seg" role="radiogroup">
+      <input type="radio" name="dir" id="d1" value="de" checked><label for="d1">Deutsch → Englisch</label>
+      <input type="radio" name="dir" id="d2" value="en"><label for="d2">Englisch → Deutsch</label>
+      <input type="radio" name="dir" id="d3" value="mix"><label for="d3">Zufall</label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Antwort</h2>
+    <div class="seg" role="radiogroup">
+      <input type="radio" name="ans" id="a1" value="type" checked><label for="a1">Tippen</label>
+      <input type="radio" name="ans" id="a2" value="speak"><label for="a2">Sprechen</label>
+      <input type="radio" name="ans" id="a3" value="mc"><label for="a3">Multiple Choice</label>
+    </div>
+    <p class="note" id="micnote"></p>
+  </div>
+
+  <button class="primary" id="start" disabled style="width:100%;padding:14px">Runde starten</button>
+</section>
+
+<!-- Abfrage -->
+<section id="quiz" class="hidden">
+  <div class="top"><span id="prog"></span><button id="quit" style="padding:5px 10px;font-size:14px">Runde beenden</button></div>
+  <div class="bar"><i id="barfill"></i></div>
+  <div class="card">
+    <div class="dir" id="dirlabel"></div>
+    <div class="word" id="prompt"></div>
+    <div id="answerArea"></div>
+    <div id="fb" class="fb hidden" aria-live="polite"></div>
+    <div class="actions" id="actions"></div>
+  </div>
+</section>
+
+<!-- Ergebnis -->
+<section id="result" class="hidden">
+  <h1>Runde vorbei</h1>
+  <p class="sub" id="resSub"></p>
+  <div class="panel">
+    <div class="stats" id="stats"></div>
+    <h2 id="hardTitle">Fehler gemacht bei</h2>
+    <ul class="list" id="hard"></ul>
+  </div>
+  <div class="panel hidden" id="prPanel">
+    <h2>Aussprache unsicher</h2>
+    <ul class="list" id="prList"></ul>
+  </div>
+  <div class="row">
+    <button class="primary" id="againErr">Nur Fehlerwörter üben</button>
+    <button id="againAll">Ganze Liste noch mal</button>
+    <button id="toSetup">Einstellungen</button>
+  </div>
+</section>
+
+</main>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+const SR=window.__AndroidSR||window.SpeechRecognition||window.webkitSpeechRecognition;
+const synth=window.__vtSynth||window.speechSynthesis;
+
+/* ---------- Einstellungen merken ---------- */
+function loadPrefs(){try{const p=JSON.parse(localStorage.getItem("vt-prefs")||"{}");
+  if(p.dir){const e=document.querySelector(`input[name=dir][value=${p.dir}]`);if(e)e.checked=true}
+  if(p.ans){const e=document.querySelector(`input[name=ans][value=${p.ans}]`);if(e&&!e.disabled)e.checked=true}}catch(e){}}
+function savePrefs(){try{localStorage.setItem("vt-prefs",JSON.stringify({dir:val("dir"),ans:val("ans")}))}catch(e){}}
+const val=n=>document.querySelector(`input[name=${n}]:checked`).value;
+
+if(!SR){$("a2").disabled=true;$("micnote").textContent=window.AndroidApp?"Auf diesem Handy ist keine Spracherkennung eingerichtet (z. B. Google-App fehlt).":"Spracheingabe wird von diesem Browser nicht unterstützt. In Chrome oder Safari öffnen.";}
+else $("micnote").textContent="Sprechen: Aussprache wird nur bei englischen Antworten bewertet. Mikrofon muss erlaubt sein.";
+loadPrefs();
+
+/* ---------- PDF laden ---------- */
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc="pdf.worker.min.js";
+let lists=[]; // {name, entries:[{en,de}]}
+
+async function parsePdf(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const out=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p);
+    const tc=await page.getTextContent();
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({s:i.str,x:i.transform[4],y:i.transform[5]}));
+    // Zeilen nach y gruppieren
+    items.sort((a,b)=>b.y-a.y||a.x-b.x);
+    const rows=[];
+    for(const it of items){
+      let r=rows.find(r=>Math.abs(r.y-it.y)<3);
+      if(!r){r={y:it.y,items:[]};rows.push(r)}
+      r.items.push(it);
+    }
+    rows.sort((a,b)=>b.y-a.y);
+    rows.forEach(r=>r.items.sort((a,b)=>a.x-b.x));
+    // Spaltengrenze aus Kopfzeile "Deutsch"
+    let colX=null;
+    for(const r of rows){const d=r.items.find(i=>/^\s*Deutsch\s*$/i.test(i.s));if(d){colX=d.x;break}}
+    if(colX===null){ // Ersatz: häufigste x-Position rechts vom linken Rand
+      const xs=items.map(i=>Math.round(i.x/5)*5);const minX=Math.min(...xs);
+      const cnt={};xs.filter(x=>x>minX+40).forEach(x=>cnt[x]=(cnt[x]||0)+1);
+      const best=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];colX=best?+best[0]-3:null;
+    }
+    if(colX===null) continue;
+    let last=null;
+    for(const r of rows){
+      const left=r.items.filter(i=>i.x<colX-2).map(i=>i.s).join(" ").replace(/\s+/g," ").trim();
+      const right=r.items.filter(i=>i.x>=colX-2).map(i=>i.s).join(" ").replace(/\s+/g," ").trim();
+      if(/^englisch$/i.test(left)&&/^deutsch$/i.test(right)) continue;
+      if(left&&right){last={en:left,de:right};out.push(last)}
+      else if(last&&right&&!left){last.de+=" "+right}
+      else if(last&&left&&!right&&!/einträge|vokabeln/i.test(left)){last.en+=" "+left}
+    }
+  }
+  // Doppelte entfernen
+  const seen=new Set();
+  return out.filter(e=>{const k=e.en.toLowerCase()+"|"+e.de.toLowerCase();if(seen.has(k))return false;seen.add(k);return true});
+}
+
+async function addFiles(fileList){
+  const msg=$("loadmsg");
+  if(!window.pdfjsLib){msg.textContent="PDF-Leser konnte nicht geladen werden. Seite neu laden.";return}
+  for(const f of fileList){
+    if(f.type!=="application/pdf"&&!/\.pdf$/i.test(f.name)){msg.textContent=`${f.name} ist keine PDF.`;continue}
+    msg.textContent=`Lese ${f.name} …`;
+    try{
+      const entries=await parsePdf(f);
+      if(!entries.length){msg.textContent=`In ${f.name} wurde keine zweispaltige Liste gefunden.`;continue}
+      lists.push({name:f.name,entries});msg.textContent="";
+    }catch(e){msg.textContent=`${f.name} konnte nicht gelesen werden.`}
+  }
+  renderFiles();
+}
+function renderFiles(){
+  const ul=$("files");ul.innerHTML="";
+  lists.forEach((l,i)=>{const li=document.createElement("li");
+    const s=document.createElement("span");s.textContent=`${l.name} – ${l.entries.length} Vokabeln`;
+    const b=document.createElement("button");b.textContent="Entfernen";b.onclick=()=>{lists.splice(i,1);renderFiles()};
+    li.append(s,b);ul.append(li)});
+  const n=allEntries().length;
+  $("start").disabled=!n;$("start").textContent=n?`Runde starten (${n} Vokabeln)`:"Runde starten";
+}
+const allEntries=()=>{const seen=new Set();return lists.flatMap(l=>l.entries).filter(e=>{const k=e.en+"|"+e.de;if(seen.has(k))return false;seen.add(k);return true})};
+
+const drop=$("drop"),fileIn=$("file");
+fileIn.onchange=()=>{addFiles(fileIn.files);fileIn.value=""};
+["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",e=>addFiles(e.dataTransfer.files));
+
+/* ---------- Antwortprüfung ---------- */
+function norm(s){
+  return s.toLowerCase().normalize("NFC")
+    .replace(/[’`´]/g,"'").replace(/…|\.\.\./g," ")
+    .replace(/[^\p{L}\p{N}' ]+/gu," ").replace(/\s+/g," ").trim();
+}
+function stripEn(s){return s.replace(/^(to|a|an|the) /,"")}
+function stripDe(s){return s.replace(/^(der|die|das|ein|eine|sich) /,"")}
+function variants(raw){ // mit und ohne Klammerinhalt
+  const a=raw.replace(/\([^)]*\)/g," "), b=raw.replace(/[()]/g," ");
+  return [...new Set([a,b])];
+}
+function altsEn(en){
+  const out=new Set();
+  en.split("/").forEach(p=>variants(p).forEach(v=>{const n=norm(v);if(n){out.add(n);out.add(stripEn(n))}}));
+  return [...out];
+}
+function altsDe(de){
+  const out=new Set();
+  const parts=[de,...de.split(/[;,]/)];
+  parts.forEach(p=>variants(p).forEach(v=>{const n=norm(v);if(n){out.add(n);out.add(stripDe(n))}}));
+  return [...out].filter(x=>x.length>1);
+}
+function lev(a,b){
+  if(Math.abs(a.length-b.length)>2)return 9;
+  const d=Array.from({length:a.length+1},(_,i)=>[i]);
+  for(let j=1;j<=b.length;j++)d[0][j]=j;
+  for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)
+    d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  return d[a.length][b.length];
+}
+// Ergebnis: "exact" | "typo" | null
+function check(input,alts,lang){
+  let n=norm(input);if(!n)return null;
+  const cands=[n,lang==="en"?stripEn(n):stripDe(n)];
+  for(const c of cands)if(alts.includes(c))return "exact";
+  for(const c of cands)for(const a of alts){
+    const tol=a.length>=9?2:a.length>=5?1:0;
+    if(tol&&lev(c,a)<=tol)return "typo";
+  }
+  return null;
+}
+
+/* ---------- Runde ---------- */
+let S=null; // Zustand der Runde
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+function startRound(entries){
+  savePrefs();
+  const dir=val("dir"),ans=val("ans");
+  const items=entries.map((e,i)=>({id:i,en:e.en,de:e.de,errors:0,pron:null}));
+  S={items,queue:shuffle(items.slice()),done:0,asked:0,wrong:0,dir,ans,cur:null,answered:false,pool:entries};
+  show("quiz");next();
+}
+function show(id){["setup","quiz","result"].forEach(s=>$(s).classList.toggle("hidden",s!==id));window.scrollTo(0,0)}
+
+function next(){
+  if(!S.queue.length)return finish();
+  const it=S.queue.shift();
+  const d=S.dir==="mix"?(Math.random()<.5?"de":"en"):S.dir; // d = Sprache der Frage
+  S.cur={it,ask:d,target:d==="de"?"en":"de"};S.answered=false;S.asked++;
+  renderQuestion();
+}
+function renderProgress(){
+  const tot=S.items.length;
+  $("prog").textContent=`${S.done} von ${tot} erledigt · ${S.queue.length+(S.answered?0:1)} offen`;
+  $("barfill").style.width=(S.done/tot*100)+"%";
+}
+function speakEn(text){
+  if(window.AndroidApp){window.AndroidApp.speak(text.replace(/\//g,", "),"en-GB",0.9);return}
+  if(!synth)return;synth.cancel();
+  const u=new SpeechSynthesisUtterance(text.replace(/\//g,", "));u.lang="en-GB";u.rate=.9;
+  const v=synth.getVoices().find(v=>/^en-(GB|US)/.test(v.lang));if(v)u.voice=v;
+  synth.speak(u);
+}
+function renderQuestion(){
+  const {it,ask,target}=S.cur;
+  renderProgress();
+  $("dirlabel").textContent=ask==="de"?"Auf Englisch:":"Auf Deutsch:";
+  const p=$("prompt");p.textContent=ask==="de"?it.de:it.en;
+  if(ask==="en"&&synth){const b=document.createElement("button");b.textContent="Anhören";b.onclick=()=>speakEn(it.en);p.append(b)}
+  $("fb").className="fb hidden";$("fb").innerHTML="";
+  const area=$("answerArea");area.innerHTML="";
+  const act=$("actions");act.innerHTML="";
+  const mode=(S.ans==="speak"&&!SR)?"type":S.ans;
+
+  if(mode==="type"){
+    const inp=document.createElement("input");inp.type="text";inp.autocomplete="off";inp.autocapitalize="off";inp.spellcheck=false;
+    inp.lang=target==="en"?"en":"de";inp.placeholder=target==="en"?"Englische Vokabel":"Deutsches Wort";
+    area.append(inp);
+    const ok=btn("Prüfen","primary grow",()=>submitTyped(inp.value));
+    const skip=btn("Weiß ich nicht","",()=>reveal());
+    act.append(ok,skip);
+    inp.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();if(!S.answered)submitTyped(inp.value)}};
+    setTimeout(()=>inp.focus(),30);
+  }else if(mode==="mc"){
+    const correct=target==="en"?it.en:it.de;
+    const others=shuffle(S.pool.filter(e=>(target==="en"?e.en:e.de)!==correct)).slice(0,3).map(e=>target==="en"?e.en:e.de);
+    const opts=shuffle([correct,...others]);
+    const box=document.createElement("div");box.className="choices";
+    opts.forEach((o,k)=>{const b=btn(`${k+1}  ${o}`,"",()=>submitMC(o,correct,box));b.dataset.v=o;box.append(b)});
+    area.append(box);
+  }else{
+    const mic=btn("Antippen und sprechen","mic",()=>listen(mic));
+    area.append(mic);
+    act.append(btn("Weiß ich nicht","",()=>reveal()));
+  }
+}
+function btn(t,cls,fn){const b=document.createElement("button");b.textContent=t;if(cls)b.className=cls;b.onclick=fn;return b}
+
+function solutionText(){const {it,target}=S.cur;return target==="en"?it.en:it.de}
+
+function submitTyped(v){
+  if(S.answered)return;
+  if(!v.trim()){return}
+  const {it,target}=S.cur;
+  const r=check(v,target==="en"?altsEn(it.en):altsDe(it.de),target);
+  if(r==="exact")result(true,`<b>Richtig.</b>`+(norm(v)!==norm(solutionText())?`<span class="sol">Vollständig: ${esc(solutionText())}</span>`:""));
+  else if(r==="typo")result(true,`<b>Richtig, mit Tippfehler.</b><span class="sol">Korrekt: ${esc(solutionText())}</span>`,"warn");
+  else result(false,`<b>Falsch.</b><span class="sol">Richtig: ${esc(solutionText())}</span>`,null,true);
+}
+function submitMC(choice,correct,box){
+  if(S.answered)return;
+  [...box.children].forEach(b=>{b.disabled=true;if(b.dataset.v===correct)b.classList.add("right");else if(b.dataset.v===choice)b.classList.add("wrong")});
+  if(choice===correct)result(true,"<b>Richtig.</b>");
+  else result(false,`<b>Falsch.</b><span class="sol">Richtig: ${esc(correct)}</span>`);
+}
+function reveal(){if(S.answered)return;result(false,`<span class="sol" style="margin:0">Richtig: ${esc(solutionText())}</span>`)}
+
+/* Sprache */
+let rec=null;
+function listen(mic){
+  if(S.answered)return;
+  if(rec){try{rec.stop()}catch(e){}return}
+  const {it,target}=S.cur;
+  rec=new SR();rec.lang=target==="en"?"en-US":"de-DE";rec.maxAlternatives=5;rec.interimResults=false;rec.continuous=false;
+  mic.classList.add("listening");mic.textContent="Höre zu … (antippen zum Stoppen)";
+  let got=false;
+  rec.onresult=e=>{
+    got=true;const res=e.results[0];const alts=[];
+    for(let i=0;i<res.length;i++)alts.push({t:res[i].transcript,c:res[i].confidence});
+    evalSpeech(alts);
+  };
+  rec.onerror=e=>{
+    const m=e.error==="not-allowed"||e.error==="service-not-allowed"?(window.AndroidApp?"Kein Zugriff aufs Mikrofon. In den Android-Einstellungen bei der App erlauben.":"Kein Zugriff aufs Mikrofon. Im Browser erlauben oder die Seite direkt im Browser öffnen."):
+      e.error==="no-speech"?"Nichts gehört. Noch mal versuchen.":e.error==="network"?"Spracherkennung braucht eine Internetverbindung.":"Spracherkennung fehlgeschlagen ("+e.error+").";
+    const fb=$("fb");fb.className="fb warn";fb.textContent=m;
+  };
+  rec.onend=()=>{rec=null;if(!S.answered){mic.classList.remove("listening");mic.textContent=got?"Noch mal sprechen":"Antippen und sprechen"}};
+  try{rec.start()}catch(e){rec=null}
+}
+function evalSpeech(alts){
+  const {it,target}=S.cur;
+  const solAlts=target==="en"?altsEn(it.en):altsDe(it.de);
+  let hit=-1,kind=null;
+  for(let i=0;i<alts.length;i++){const r=check(alts[i].t,solAlts,target);if(r){hit=i;kind=r;break}}
+  const heard=alts[0]?alts[0].t:"";
+  if(hit<0){
+    result(false,`<b>Falsch.</b><span class="sol">Verstanden: „${esc(heard)}“<br>Richtig: ${esc(solutionText())}</span>`);
+    return;
+  }
+  let pr="",grade=null,cls="ok";
+  if(target==="en"){
+    const c=alts[hit].c;
+    if(hit===0&&kind==="exact"&&c>=.85){grade="gut";pr="Aussprache: gut."}
+    else if(hit===0&&kind==="exact"&&c>=.6){grade="verständlich";pr="Aussprache: verständlich, nicht ganz sauber."}
+    else if(hit===0&&kind==="exact"&&!c){grade=null;pr="Aussprache: erkannt (Browser liefert keine Sicherheitswerte)."}
+    else{grade="unsicher";pr=`Aussprache: unsicher. Erkannt wurde zuerst „${esc(heard)}“.`;cls="warn"}
+    if(grade==="unsicher"||grade==="verständlich")it.pron=grade;
+    else if(grade==="gut")it.pron=null;
+  }
+  result(true,`<b>Richtig.</b>`+(pr?`<span class="pr">${pr}</span>`:"")+(norm(alts[hit].t)!==norm(solutionText())?`<span class="sol">Vollständig: ${esc(solutionText())}</span>`:""),cls==="warn"?"warn":null);
+}
+
+function result(ok,html,cls,allowOverride){
+  S.answered=true;
+  const {it,target}=S.cur;
+  const fb=$("fb");fb.className="fb "+(cls||(ok?"ok":"bad"));fb.innerHTML=html;
+  if(ok){S.done++}
+  else{
+    it.errors++;S.wrong++;
+    const pos=Math.min(S.queue.length,3+Math.floor(Math.random()*4));
+    S.queue.splice(pos,0,it);
+  }
+  renderProgress();
+  const area=$("answerArea");area.querySelectorAll("input,button").forEach(e=>e.disabled=true);
+  const act=$("actions");act.innerHTML="";
+  const nb=btn(S.queue.length?"Weiter":"Auswertung","primary grow",next);
+  act.append(nb);
+  if(allowOverride){act.append(btn("War doch richtig","",()=>{
+    it.errors--;S.wrong--;S.done++;const i=S.queue.lastIndexOf(it);if(i>-1)S.queue.splice(i,1);
+    fb.className="fb ok";fb.innerHTML="<b>Als richtig gewertet.</b><span class=\"sol\">"+esc(solutionText())+"</span>";
+    act.lastChild.remove();nb.textContent=S.queue.length?"Weiter":"Auswertung";renderProgress();nb.focus();
+  }))}
+  if(synth&&(target==="en"||S.cur.ask==="en"))act.append(btn("Anhören","",()=>speakEn(it.en)));
+  setTimeout(()=>nb.focus(),30);
+}
+document.addEventListener("keydown",e=>{
+  if($("quiz").classList.contains("hidden")||!S)return;
+  if(!S.answered&&S.ans==="mc"&&/^[1-4]$/.test(e.key)){const b=document.querySelectorAll(".choices button")[+e.key-1];if(b)b.click()}
+});
+
+function finish(){
+  show("result");
+  const tot=S.items.length;const errs=S.items.filter(i=>i.errors>0).sort((a,b)=>b.errors-a.errors);
+  $("resSub").textContent=`${tot} Vokabeln, alle richtig beantwortet.`;
+  const quote=S.asked?Math.round((S.asked-S.wrong)/S.asked*100):100;
+  $("stats").innerHTML=`<div><b>${S.asked}</b><span>Fragen</span></div><div><b>${S.wrong}</b><span>Fehler</span></div><div><b>${quote} %</b><span>auf Anhieb</span></div>`;
+  const hard=$("hard");hard.innerHTML="";
+  $("hardTitle").textContent=errs.length?"Fehler gemacht bei":"Keine Fehler.";
+  errs.forEach(i=>{const li=document.createElement("li");li.innerHTML=`<span>${esc(i.en)} – ${esc(i.de)}</span><span class="n">${i.errors}×</span>`;hard.append(li)});
+  const pr=S.items.filter(i=>i.pron);
+  $("prPanel").classList.toggle("hidden",!pr.length);
+  $("prList").innerHTML="";
+  pr.forEach(i=>{const li=document.createElement("li");const s=document.createElement("span");s.textContent=i.en;
+    const b=btn("Anhören","",()=>speakEn(i.en));b.style.cssText="padding:2px 8px;font-size:13px";li.append(s,b);$("prList").append(li)});
+  $("againErr").classList.toggle("hidden",!errs.length&&!pr.length);
+  $("againErr").onclick=()=>startRound([...new Set([...errs,...pr])].map(i=>({en:i.en,de:i.de})));
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+
+$("start").onclick=()=>startRound(allEntries());
+$("againAll").onclick=()=>startRound(allEntries());
+$("toSetup").onclick=()=>show("setup");
+$("quit").onclick=()=>{if(confirm("Runde abbrechen?"))show("setup")};
+if(synth)synth.getVoices();
+})();
+</script>
+</body>
+</html>
